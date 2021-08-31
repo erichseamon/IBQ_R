@@ -1,0 +1,854 @@
+---
+title: "IBQ_R"
+author: "Erich Seamon"
+date: "11/15/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Summary
+
+Summary content.
+
+## Exploratory Data Analysis
+
+Explanation of EDA processes.
+
+```{r, echo=FALSE,warning = FALSE, message = FALSE}
+
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(data.table)
+library(caret)
+library(doParallel)
+library(plyr)
+
+
+ibq <- read.csv("/mnt/ceph/erichs/git/IBQ_R/data/IBQ-R.csv")
+
+ibq <- na.omit(ibq)
+ibq <- subset(ibq, infantgender != -99999)
+ibq <- subset(ibq, infantage_ibq != -99999)
+
+
+#EDA
+
+#bwplot(researcher ~ infantage_ibq, data = ibq, main = "Infant Age (weeks) vs. Researcher site")
+#bwplot(infantgender ~ infantage_ibq, data = ibq, main = "Infant Age (weeks) vs. Gender")
+#bwplot(infantrace ~ infantage_ibq, data = ibq, main = "Infant Age (weeks) vs. Race")
+
+bwplot(AgeGrp ~ fear, data = ibq, main = "fear vs. Infant Age Group")
+bwplot(AgeGrp ~ hp, data = ibq, main = "hp vs. Infant Age Group")
+bwplot(AgeGrp ~ sooth, data = ibq, main = "sooth vs. Infant Age Group")
+bwplot(AgeGrp ~ cud, data = ibq, main = "cud vs. Infant Age Group")
+bwplot(AgeGrp ~ vr, data = ibq, main = "vr vs. Infant Age Group")
+# 
+# bwplot(fear ~ infantage_ibq, data = ibq, main = "fear vs. Infant Age (weeks)")
+# bwplot(sooth ~ infantage_ibq, data = ibq, main = "sooth vs. Infant Age (weeks)")
+# bwplot(hp ~ infantage_ibq, data = ibq, main = "hp vs. Infant Age (weeks)")
+# bwplot(cud ~ infantage_ibq, data = ibq, main = "cud vs. Infant Age (weeks)")
+# bwplot(vr ~ infantage_ibq, data = ibq, main = "vr vs. Infant Age (weeks)")
+
+bwplot(infantgender ~ fear, data = ibq, main = "fear vs. Gender")
+bwplot(infantgender ~ hp, data = ibq, main = "hp vs. Gender")
+bwplot(infantgender ~ sooth, data = ibq, main = "sooth vs. Gender")
+bwplot(infantgender ~ cud, data = ibq, main = "cud vs. Gender")
+bwplot(infantgender ~ vr, data = ibq, main = "vr vs. Gender")
+
+
+```
+\newpage
+
+## Model Development and Output: Infant gender for all ages
+
+Explanation of modeling development and outputs.
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, error=FALSE, results='hide'}
+
+#Infant gender model construction
+
+ibq$AgeGrp <- as.factor(ibq$AgeGrp)
+ibq$AgeGrp <- revalue(ibq$AgeGrp, c("1"="one", "2"="two", "3"="three"))
+
+#ibq <- subset(ibq, AgeGrp == "three")
+
+ibq$infantgender <- as.factor(ibq$infantgender)
+levels(ibq$infantgender) <- c('male', 'female')
+
+set.seed(103)
+inTraining <- createDataPartition(ibq$infantgender, p = .7, list = FALSE)
+training <- ibq[ inTraining,]
+testing  <- ibq[-inTraining,]
+
+fmla <- as.formula(paste("infantgender ~ ", paste(colnames(ibq[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)]), collapse= "+")))
+predictors <- colnames(ibq[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)])
+
+train_control<- trainControl(method="repeatedcv", savePredictions = "final", classProbs = T, returnResamp='all')
+
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+fit_rf_gender <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_lda_gender <- caret::train(fmla, data=training, method="lda", trControl = train_control)
+fit_glm_gender <- caret::train(fmla, data=training, method="glm", trControl = train_control)
+fit_knn_gender <- caret::train(fmla, data=training, method="knn",trControl = train_control)
+fit_nb_gender <- caret::train(fmla, data=training, method="nb", trControl = train_control)
+fit_svm_gender <- caret::train(fmla, data=training, method="svmRadial", trControl = train_control)
+fit_cart_gender <- caret::train(fmla, data=training, method="rpart", trControl = train_control)
+fit_c50_gender <- caret::train(fmla, data=training, method="C5.0", trControl = train_control)
+fit_treebag_gender <- caret::train(fmla, data=training, method="treebag", trControl = train_control)
+fit_gbm_gender <- caret::train(fmla, data=training, method="gbm", trControl = train_control, verbose = FALSE)
+fit_adabag_gender <- caret::train(fmla, data=training, method="AdaBag", trControl = train_control)
+
+## When you are done:
+stopCluster(cl)
+
+
+#infant gender model results
+
+results <- resamples(list(lda=fit_lda_gender, glm=fit_glm_gender,
+                          svm=fit_svm_gender, knn=fit_knn_gender, nb=fit_nb_gender, cart=fit_cart_gender, c50=fit_c50_gender,
+                          treebag=fit_treebag_gender, rf=fit_rf_gender, gbm=fit_gbm_gender, adabag=fit_adabag_gender))
+# Table comparison
+#summary(results)
+
+# boxplot comparison
+bwplot(results)
+# Dot-plot comparison
+#dotplot(results)
+
+
+modellist <- c("lda", "glm", "svm", "knn", "nb", "cart", "c50", "treebag", "rf", "gbm", "adabag")
+leng <- 1:length(modellist)  
+txt <- NULL
+txt2 <- NULL
+j <- 1
+for (i in modellist) {
+  modelnumber <- leng[j]
+  library("ROCR")
+  ### CONSTRUCTING ROC AUC PLOT:
+  # Get the posteriors as a dataframe.
+  predictions <-predict(object = eval(parse(text=paste("fit_", i, "_gender", sep=""))), testing[,predictors], type = "prob")
+  predictions.posteriors <- as.data.frame(predictions)
+  
+  # Evaluate the model
+  pred <- prediction(predictions.posteriors[,2], testing[,3])
+  roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+  auc.train <- performance(pred, measure = "auc")
+  auc.train <- auc.train@y.values
+  # Plot
+  
+  if(modelnumber == 1) {
+    plot(roc.perf, col = j)  
+    #abline(a=0, b= 1)
+    #text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+  } else{
+    plot(roc.perf, col = j, add = TRUE)
+    #abline(a=0, b= 1)
+
+  }
+  txt[j] <- paste(i, " AUC = ", round(auc.train[[1]],3), sep = "")
+    txt2[j] <- round(auc.train[[1]],3)
+  j <- j+1
+    
+}
+
+legend(.01,.99, txt, lty = 1, col = c(1:11), cex = .5)
+
+# 
+# 
+# #confusion matrix results
+# 
+# 
+# testing$pred_svm<-predict(object = fit_svm_gender,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_svm)
+# 
+# testing$pred_rf<-predict(object = fit_rf_gender,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_rf)
+# 
+# 
+# testing$pred_lda<-predict(object = fit_lda_gender,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_lda)
+# 
+# 
+# testing$pred_gbm<-predict(object = fit_gbm_gender,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_gbm)
+
+ results_gender <- results
+ auc_gender <- txt2
+ 
+
+```
+\newpage
+
+## Model Development and Output: Age Groups for all genders
+
+Explanation of modeling development and outputs.
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#AgeGrp gender model construction
+
+ibq$AgeGrp <- as.factor(ibq$AgeGrp)
+ibq$AgeGrp <- revalue(ibq$AgeGrp, c("1"="one", "2"="two", "3"="three"))
+
+#ibq <- subset(ibq, AgeGrp == "three")
+
+ibq$infantgender <- as.factor(ibq$infantgender)
+levels(ibq$infantgender) <- c('male', 'female')
+
+set.seed(103)
+inTraining <- createDataPartition(ibq$AgeGrp, p = .7, list = FALSE)
+training <- ibq[ inTraining,]
+testing  <- ibq[-inTraining,]
+
+fmla <- as.formula(paste("AgeGrp ~ ", paste(colnames(ibq[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)]), collapse= "+")))
+predictors <- colnames(ibq[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)])
+
+train_control<- trainControl(method="repeatedcv", savePredictions = "final", classProbs = T, returnResamp='all')
+
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+fit_rf_agegrp <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_lda_agegrp <- caret::train(fmla, data=training, method="lda", trControl = train_control)
+fit_glm_agegrp <- caret::train(fmla, data=training, trControl = train_control, method="multinom")  #altered to multinom given multiple classes
+fit_knn_agegrp <- caret::train(fmla, data=training, method="knn",trControl = train_control)
+fit_nb_agegrp <- caret::train(fmla, data=training, method="nb", trControl = train_control)
+fit_svm_agegrp <- caret::train(fmla, data=training, method="svmRadial", trControl = train_control)
+fit_cart_agegrp <- caret::train(fmla, data=training, method="rpart", trControl = train_control)
+fit_c50_agegrp <- caret::train(fmla, data=training, method="C5.0", trControl = train_control)
+fit_treebag_agegrp <- caret::train(fmla, data=training, method="treebag", trControl = train_control)
+fit_gbm_agegrp <- caret::train(fmla, data=training, method="gbm", trControl = train_control, verbose = FALSE)
+fit_adabag_agegrp <- caret::train(fmla, data=training, method="AdaBag", trControl = train_control)
+
+## When you are done:
+stopCluster(cl)
+
+
+#age grp
+
+
+
+results <- resamples(list(lda=fit_lda_agegrp, glm=fit_glm_agegrp,
+                          svm=fit_svm_agegrp, knn=fit_knn_agegrp, nb=fit_nb_agegrp, cart=fit_cart_agegrp, c50=fit_c50_agegrp,
+                          treebag=fit_treebag_agegrp, rf=fit_rf_agegrp, gbm=fit_gbm_agegrp, adabag=fit_adabag_agegrp))
+# Table comparison
+#summary(results)
+
+# boxplot comparison
+bwplot(results)
+# Dot-plot comparison
+#dotplot(results)
+
+
+predictions <-predict(object = eval(parse(text=paste("fit_", i, "_agegrp", sep=""))), testing[,predictors], type = "prob")
+# 
+# #multiclass testing
+# roc.multi <- multiclass.roc(testing$AgeGrp, predictions)
+# auc(roc.multi)
+# 
+# rs <- roc.multi[['rocs']]
+# plot.roc(rs[[1]])
+# sapply(2:length(rs),function(i) lines.roc(rs[[i]],col=i))
+# 
+# #--end multiclass testing
+
+
+
+
+modellist <- c("lda", "glm", "svm", "knn", "nb", "cart", "c50", "treebag", "rf", "gbm", "adabag")
+leng <- 1:length(modellist)  
+txt <- NULL
+txt2 <- NULL
+j <- 1
+for (i in modellist) {
+modelnumber <- leng[j]
+library("ROCR")
+### CONSTRUCTING ROC AUC PLOT:
+# Get the posteriors as a dataframe.
+predictions <-predict(object = eval(parse(text=paste("fit_", i, "_agegrp", sep=""))), testing[,predictors], type = "prob")
+predictions.posteriors <- as.data.frame(predictions)
+
+# Evaluate the model
+pred <- prediction(predictions.posteriors[,2], testing[,3])
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+# Plot
+
+if(modelnumber == 1) {
+plot(roc.perf, col = j)  
+  #abline(a=0, b= 1)
+  #text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+} else{
+plot(roc.perf, col = j, add = TRUE)
+#abline(a=0, b= 1)
+}
+txt[j] <- paste(i, " AUC = ", round(auc.train[[1]],3), sep = "")
+txt2[j] <- round(auc.train[[1]],3)
+j <- j+1
+
+}
+
+legend(.01,.99, txt, lty = 1, col = c(1:11), cex = .5)
+
+#confusion matrix results
+# 
+# 
+# testing$pred_svm<-predict(object = fit_svm_agegrp,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_svm)
+# 
+# testing$pred_rf<-predict(object = fit_rf_agegrp,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_rf)
+# 
+# 
+# testing$pred_lda<-predict(object = fit_lda_agegrp,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_lda)
+# 
+# 
+# testing$pred_glm<-predict(object = fit_glm_agegrp,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_glm)
+# 
+# 
+# testing$pred_gbm<-predict(object = fit_gbm_agegrp,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_gbm)
+
+ results_age <- results
+ auc_age <- txt2
+
+
+
+
+```
+
+\newpage
+
+## Model Development and Output: Infant gender for Age Group 1
+
+Explanation of modeling development and outputs.
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#infant gender subset by AgeGrp - one
+
+ibq$AgeGrp <- as.factor(ibq$AgeGrp)
+ibq$AgeGrp <- revalue(ibq$AgeGrp, c("1"="one", "2"="two", "3"="three"))
+
+ibq_one <- subset(ibq, AgeGrp == "one")
+
+ibq_one$infantgender <- as.factor(ibq_one$infantgender)
+levels(ibq_one$infantgender) <- c('male', 'female')
+
+set.seed(103)
+inTraining <- createDataPartition(ibq_one$infantgender, p = .7, list = FALSE)
+training <- ibq_one[ inTraining,]
+testing  <- ibq_one[-inTraining,]
+
+fmla <- as.formula(paste("infantgender ~ ", paste(colnames(ibq_one[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)]), collapse= "+")))
+predictors <- colnames(ibq_one[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)])
+
+train_control<- trainControl(method="repeatedcv", savePredictions = "final", classProbs = T, returnResamp='all')
+
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+fit_rf_gender_age_one <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_lda_gender_age_one <- caret::train(fmla, data=training, method="lda", trControl = train_control)
+fit_glm_gender_age_one <- caret::train(fmla, data=training, method="glm", trControl = train_control)
+fit_knn_gender_age_one <- caret::train(fmla, data=training, method="knn",trControl = train_control)
+fit_nb_gender_age_one <- caret::train(fmla, data=training, method="nb", trControl = train_control)
+fit_svm_gender_age_one <- caret::train(fmla, data=training, method="svmRadial", trControl = train_control)
+fit_cart_gender_age_one <- caret::train(fmla, data=training, method="rpart", trControl = train_control)
+fit_c50_gender_age_one <- caret::train(fmla, data=training, method="C5.0", trControl = train_control)
+fit_treebag_gender_age_one <- caret::train(fmla, data=training, method="treebag", trControl = train_control)
+fit_gbm_gender_age_one <- caret::train(fmla, data=training, method="gbm", trControl = train_control, verbose = FALSE)
+fit_adabag_gender_age_one <- caret::train(fmla, data=training, method="AdaBag", trControl = train_control)
+
+## When you are done:
+stopCluster(cl)
+
+
+
+#infant gender age group one
+
+
+
+results <- resamples(list(lda=fit_lda_gender_age_one, glm=fit_glm_gender_age_one,
+                          svm=fit_svm_gender_age_one, knn=fit_knn_gender_age_one, nb=fit_nb_gender_age_one, cart=fit_cart_gender_age_one, c50=fit_c50_gender_age_one,
+                          treebag=fit_treebag_gender_age_one, rf=fit_rf_gender_age_one, gbm=fit_gbm_gender_age_one, adabag=fit_adabag_gender_age_one))
+# Table comparison
+#summary(results)
+
+# boxplot comparison
+bwplot(results)
+# Dot-plot comparison
+#dotplot(results)
+
+
+modellist <- c("lda", "glm", "svm", "knn", "nb", "cart", "c50", "treebag", "rf", "gbm", "adabag")
+leng <- 1:length(modellist)  
+txt <- NULL
+txt2 <- NULL
+j <- 1
+for (i in modellist) {
+modelnumber <- leng[j]
+library("ROCR")
+### CONSTRUCTING ROC AUC PLOT:
+# Get the posteriors as a dataframe.
+predictions <-predict(object = eval(parse(text=paste("fit_", i, "_gender_age_one", sep=""))), testing[,predictors], type = "prob")
+predictions.posteriors <- as.data.frame(predictions)
+
+# Evaluate the model
+pred <- prediction(predictions.posteriors[,2], testing[,3])
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+# Plot
+
+if(modelnumber == 1) {
+plot(roc.perf, col = j)  
+  #abline(a=0, b= 1)
+  #text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+} else{
+plot(roc.perf, col = j, add = TRUE)
+#abline(a=0, b= 1)
+
+}
+txt[j] <- paste(i, " AUC = ", round(auc.train[[1]],3), sep = "")
+txt2[j] <- round(auc.train[[1]],3)
+j <- j+1
+
+}
+
+legend(.01,.99, txt, lty = 1, col = c(1:11), cex = .5)
+
+#confusion matrix results
+# 
+# 
+# testing$pred_svm<-predict(object = fit_svm_gender_age_one,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_svm)
+# 
+# testing$pred_rf<-predict(object = fit_rf_gender_age_one,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_rf)
+# 
+# 
+# testing$pred_lda<-predict(object = fit_lda_gender_age_one,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_lda)
+# 
+# 
+# testing$pred_glm<-predict(object = fit_glm_gender_age_one,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_glm)
+# 
+# 
+# testing$pred_gbm<-predict(object = fit_gbm_gender_age_one,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_gbm)
+
+
+results_age1 <- results
+ auc_age1 <- txt2
+
+
+```
+
+\newpage
+
+## Model Development and Output: Infant gender for Age Group 2
+
+Explanation of modeling development and outputs.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#infant gender subset by AgeGrp - two
+
+ibq$AgeGrp <- as.factor(ibq$AgeGrp)
+ibq$AgeGrp <- revalue(ibq$AgeGrp, c("1"="one", "2"="two", "3"="three"))
+
+ibq_two <- subset(ibq, AgeGrp == "two")
+
+ibq_two$infantgender <- as.factor(ibq_two$infantgender)
+levels(ibq_two$infantgender) <- c('male', 'female')
+
+set.seed(103)
+inTraining <- createDataPartition(ibq_two$infantgender, p = .7, list = FALSE)
+training <- ibq_two[ inTraining,]
+testing  <- ibq_two[-inTraining,]
+
+fmla <- as.formula(paste("infantgender ~ ", paste(colnames(ibq_two[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)]), collapse= "+")))
+predictors <- colnames(ibq_two[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)])
+
+train_control<- trainControl(method="repeatedcv", savePredictions = "final", classProbs = T, returnResamp='all')
+
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+fit_rf_gender_age_two <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_lda_gender_age_two <- caret::train(fmla, data=training, method="lda", trControl = train_control)
+fit_glm_gender_age_two <- caret::train(fmla, data=training, method="glm", trControl = train_control)
+fit_knn_gender_age_two <- caret::train(fmla, data=training, method="knn",trControl = train_control)
+fit_nb_gender_age_two <- caret::train(fmla, data=training, method="nb", trControl = train_control)
+fit_svm_gender_age_two <- caret::train(fmla, data=training, method="svmRadial", trControl = train_control)
+fit_cart_gender_age_two <- caret::train(fmla, data=training, method="rpart", trControl = train_control)
+fit_c50_gender_age_two <- caret::train(fmla, data=training, method="C5.0", trControl = train_control)
+fit_treebag_gender_age_two <- caret::train(fmla, data=training, method="treebag", trControl = train_control)
+fit_gbm_gender_age_two <- caret::train(fmla, data=training, method="gbm", trControl = train_control, verbose = FALSE)
+fit_adabag_gender_age_two <- caret::train(fmla, data=training, method="AdaBag", trControl = train_control)
+
+## When you are done:
+stopCluster(cl)
+
+
+#gender - age group two
+
+
+
+results <- resamples(list(lda=fit_lda_gender_age_two, glm=fit_glm_gender_age_two,
+                          svm=fit_svm_gender_age_two, knn=fit_knn_gender_age_two, nb=fit_nb_gender_age_two, cart=fit_cart_gender_age_two, c50=fit_c50_gender_age_two,
+                          treebag=fit_treebag_gender_age_two, rf=fit_rf_gender_age_two, gbm=fit_gbm_gender_age_two, adabag=fit_adabag_gender_age_two))
+# Table comparison
+#summary(results)
+
+# boxplot comparison
+bwplot(results)
+# Dot-plot comparison
+#dotplot(results)
+
+
+modellist <- c("lda", "glm", "svm", "knn", "nb", "cart", "c50", "treebag", "rf", "gbm", "adabag")
+leng <- 1:length(modellist)  
+txt <- NULL
+txt2 <- NULL
+j <- 1
+for (i in modellist) {
+modelnumber <- leng[j]
+library("ROCR")
+### CONSTRUCTING ROC AUC PLOT:
+# Get the posteriors as a dataframe.
+predictions <-predict(object = eval(parse(text=paste("fit_", i, "_gender_age_two", sep=""))), testing[,predictors], type = "prob")
+predictions.posteriors <- as.data.frame(predictions)
+
+# Evaluate the model
+pred <- prediction(predictions.posteriors[,2], testing[,3])
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+# Plot
+
+if(modelnumber == 1) {
+plot(roc.perf, col = j)  
+  #abline(a=0, b= 1)
+  #text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+} else{
+plot(roc.perf, col = j, add = TRUE)
+#abline(a=0, b= 1)
+
+}
+ txt[j] <- paste(i, " AUC = ", round(auc.train[[1]],3), sep = "")
+ txt2[j] <- round(auc.train[[1]],3)
+j <- j+1
+
+}
+
+legend(.01,.99, txt, lty = 1, col = c(1:11), cex = .5)
+
+#confusion matrix results
+# 
+# 
+# testing$pred_svm<-predict(object = fit_svm_gender_age_two,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_svm)
+# 
+# testing$pred_rf<-predict(object = fit_rf_gender_age_two,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_rf)
+# 
+# 
+# testing$pred_lda<-predict(object = fit_lda_gender_age_two,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_lda)
+# 
+# 
+# testing$pred_glm<-predict(object = fit_glm_gender_age_two,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_glm)
+# 
+# 
+# testing$pred_gbm<-predict(object = fit_gbm_gender_age_two,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_gbm)
+# 
+# 
+
+
+results_age2 <- results
+ auc_age2 <- txt2
+
+
+
+```
+
+\newpage
+
+
+## Model Development and Output: Infant gender for Age Group 3
+
+Explanation of modeling development and outputs.
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#infant gender subset by AgeGrp - three
+
+ibq$AgeGrp <- as.factor(ibq$AgeGrp)
+ibq$AgeGrp <- revalue(ibq$AgeGrp, c("1"="one", "2"="two", "3"="three"))
+
+ibq_three <- subset(ibq, AgeGrp == "three")
+
+ibq_three$infantgender <- as.factor(ibq_three$infantgender)
+levels(ibq_three$infantgender) <- c('male', 'female')
+
+set.seed(103)
+inTraining <- createDataPartition(ibq_three$infantgender, p = .7, list = FALSE)
+training <- ibq_three[ inTraining,]
+testing  <- ibq_three[-inTraining,]
+
+fmla <- as.formula(paste("infantgender ~ ", paste(colnames(ibq_three[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)]), collapse= "+")))
+predictors <- colnames(ibq_three[c(6,7,8,9,10,11,12,13,14,15,16,17,18,19)])
+
+train_control<- trainControl(method="repeatedcv", savePredictions = "final", classProbs = T, returnResamp='all')
+
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+fit_rf_gender_age_three <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_lda_gender_age_three <- caret::train(fmla, data=training, method="lda", trControl = train_control)
+fit_glm_gender_age_three <- caret::train(fmla, data=training, method="glm", trControl = train_control)
+fit_knn_gender_age_three <- caret::train(fmla, data=training, method="knn",trControl = train_control)
+fit_nb_gender_age_three <- caret::train(fmla, data=training, method="nb", trControl = train_control)
+fit_svm_gender_age_three <- caret::train(fmla, data=training, method="svmRadial", trControl = train_control)
+fit_cart_gender_age_three <- caret::train(fmla, data=training, method="rpart", trControl = train_control)
+fit_c50_gender_age_three <- caret::train(fmla, data=training, method="C5.0", trControl = train_control)
+fit_treebag_gender_age_three <- caret::train(fmla, data=training, method="treebag", trControl = train_control)
+fit_gbm_gender_age_three <- caret::train(fmla, data=training, method="gbm", trControl = train_control, verbose = FALSE)
+fit_adabag_gender_age_three <- caret::train(fmla, data=training, method="AdaBag", trControl = train_control)
+
+## When you are done:
+stopCluster(cl)
+
+
+#infant gender age three
+
+
+
+results <- resamples(list(lda=fit_lda_gender_age_three, glm=fit_glm_gender_age_three,
+                          svm=fit_svm_gender_age_three, knn=fit_knn_gender_age_three, nb=fit_nb_gender_age_three, cart=fit_cart_gender_age_three, c50=fit_c50_gender_age_three,treebag=fit_treebag_gender_age_three, rf=fit_rf_gender_age_three, gbm=fit_gbm_gender_age_three, adabag=fit_adabag_gender_age_three))
+# Table comparison
+#summary(results)
+
+# boxplot comparison
+bwplot(results)
+# Dot-plot comparison
+#dotplot(results)
+
+
+modellist <- c("lda", "glm", "svm", "knn", "nb", "cart", "c50", "treebag", "rf", "gbm", "adabag")
+leng <- 1:length(modellist)  
+txt <- NULL
+txt2 <- NULL
+j <- 1
+for (i in modellist) {
+modelnumber <- leng[j]
+library("ROCR")
+### CONSTRUCTING ROC AUC PLOT:
+# Get the posteriors as a dataframe.
+predictions <-predict(object = eval(parse(text=paste("fit_", i, "_gender_age_three", sep=""))), testing[,predictors], type = "prob")
+predictions.posteriors <- as.data.frame(predictions)
+
+# Evaluate the model
+pred <- prediction(predictions.posteriors[,2], testing[,3])
+roc.perf = performance(pred, measure = "tpr", x.measure = "fpr")
+auc.train <- performance(pred, measure = "auc")
+auc.train <- auc.train@y.values
+# Plot
+
+if(modelnumber == 1) {
+plot(roc.perf, col = j)  
+  #abline(a=0, b= 1)
+  #text(x = .25, y = .65 ,paste("AUC = ", round(auc.train[[1]],3), sep = ""))
+} else{
+plot(roc.perf, col = j, add = TRUE)
+#abline(a=0, b= 1)
+
+
+}
+ txt[j] <- paste(i, " AUC = ", round(auc.train[[1]],3), sep = "")
+ txt2[j] <- round(auc.train[[1]],3)
+j <- j+1
+
+}
+
+legend(.003,.995, txt, lty = 1, col = c(1:11), cex = .5)
+
+
+#confusion matrix results
+# 
+# 
+# testing$pred_svm<-predict(object = fit_svm_gender_age_three,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_svm)
+# 
+# testing$pred_rf<-predict(object = fit_rf_gender_age_three,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_rf)
+# 
+# 
+# testing$pred_lda<-predict(object = fit_lda_gender_age_three,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_lda)
+# 
+# 
+# testing$pred_glm<-predict(object = fit_glm_gender_age_three,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_glm)
+# 
+# 
+# testing$pred_gbm<-predict(object = fit_gbm_gender_age_three,testing[,predictors])
+# confusionMatrix(testing$infantgender,testing$pred_gbm)
+
+results_age3 <- results
+ auc_age3 <- txt2
+
+
+```
+
+
+\newpage
+
+
+## Model Development and Output: Kmeans clustering
+
+Explanation of modeling development and outputs.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+kmean_withinss <- function(k) {
+    cluster <- kmeans(ibq[,6:19], k)
+    return (cluster$tot.withinss)
+}
+
+# Set maximum cluster 
+max_k <-20 
+# Run algorithm over a range of k 
+wss <- sapply(2:max_k, kmean_withinss)
+
+elbow <-data.frame(2:max_k, wss)
+
+
+km <- kmeans(ibq[,6:19], 9)
+
+km$size
+
+center <-km$centers
+
+
+library(tidyr)
+
+# create dataset with the cluster number
+
+cluster <- c(1: 9)
+center_df <- data.frame(cluster, center)
+
+# Reshape the data
+
+center_reshape <- gather(center_df, features, values, act: vr)
+#head(center_reshape)
+
+library(RColorBrewer)
+# Create the palette
+hm.palette <-colorRampPalette(rev(brewer.pal(10, 'RdYlGn')),space='Lab')
+
+ggplot(data = center_reshape, aes(x = features, y = cluster, fill = values)) +
+    scale_y_continuous(breaks = seq(1, 9, by = 1)) +
+    geom_tile() +
+    coord_equal() +
+    scale_fill_gradientn(colours = hm.palette(90)) +
+    theme_classic()
+```
+
+
+
+## Table Output
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(kableExtra)
+
+results_gender_b <- as.data.frame(results_gender$values)
+colnames(results_gender_b) <- colnames(as.data.frame(results_age$values))
+results_gender_accuracy <- colMeans(t(results_gender_b[c(2,4,6,8,10,12,14,16,18,20,22)]))
+results_gender_kappa <- colMeans((results_gender_b[c(3,5,7,9,11,13,15,17,19,21,23)]))
+auc_gender <- auc_gender[-1]
+gender <- cbind(results_gender_accuracy, results_gender_kappa, auc_gender)
+rownames(gender) <- c("lda", "glm", "svm", "knn", "nb", "cart", "c5.0", "bagging", "rf", "gbm", "adabag")
+
+results_age_b <- as.data.frame(results_age$values)
+results_age_accuracy <- colMeans(t(results_age_b[c(2,4,6,8,10,12,14,16,18,20,22)]))
+results_age_kappa <- colMeans((results_age_b[c(3,5,7,9,11,13,15,17,19,21,23)]))
+auc_age <- auc_age[-1]
+age <- cbind(results_age_accuracy, results_age_kappa, auc_age)
+rownames(age) <- c("lda", "glm", "svm", "knn", "nb", "cart", "c5.0", "bagging", "rf", "gbm", "adabag")
+
+
+results_age1_b <- as.data.frame(results_age1$values)
+colnames(results_age1_b) <- colnames(as.data.frame(results_age$values))
+results_age1_accuracy <- colMeans(t(results_age1_b[c(2,4,6,8,10,12,14,16,18,20,22)]))
+results_age1_kappa <- colMeans((results_age1_b[c(3,5,7,9,11,13,15,17,19,21,23)]))
+auc_age1 <- auc_age1[-1]
+age1 <- cbind(results_age1_accuracy, results_age1_kappa, auc_age1)
+rownames(age1) <- c("lda", "glm", "svm", "knn", "nb", "cart", "c5.0", "bagging", "rf", "gbm", "adabag")
+
+results_age2_b <- as.data.frame(results_age2$values)
+colnames(results_age2_b) <- colnames(as.data.frame(results_age$values))
+results_age2_accuracy <- colMeans(t(results_age2_b[c(2,4,6,8,10,12,14,16,18,20,22)]))
+results_age2_kappa <- colMeans((results_age2_b[c(3,5,7,9,11,13,15,17,19,21,23)]))
+auc_age2 <- auc_age2[-1]
+age2 <- cbind(results_age2_accuracy, results_age2_kappa, auc_age2)
+rownames(age2) <- c("lda", "glm", "svm", "knn", "nb", "cart", "c5.0", "bagging", "rf", "gbm", "adabag")
+
+results_age3_b <- as.data.frame(results_age3$values)
+colnames(results_age3_b) <- colnames(as.data.frame(results_age$values))
+results_age3_accuracy <- colMeans(t(results_age3_b[c(2,4,6,8,10,12,14,16,18,20,22)]))
+results_age3_kappa <- colMeans((results_age3_b[c(3,5,7,9,11,13,15,17,19,21,23)]))
+auc_age3 <- auc_age3[-1]
+age3 <- cbind(results_age3_accuracy, results_age3_kappa, auc_age3)
+rownames(age3) <- c("lda", "glm", "svm", "knn", "nb", "cart", "c5.0", "bagging", "rf", "gbm", "adabag")
+
+
+
+
+```
+
+\newpage
+\begin{landscape}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(kableExtra)
+
+
+agegroups <- cbind(age1, age2, age3)
+colnames(agegroups) <- c("age1 accuracy", "age1 kappa", "age1 AUC", "age2 accuracy", "age2 kappa", "age2 AUC", "age3 accuracy", "age3 kappa", "age3 AUC")
+kable(round(agegroups, 3))
+
+```
+\end{landscape}
+
+\newpage
+\begin{landscape}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+library(kableExtra)
+
+agegroups <- cbind(age1, age2, age3)
+colnames(agegroups) <- c("age1 accuracy", "age1 kappa", "age1 AUC", "age2 accuracy", "age2 kappa", "age2 AUC", "age3 accuracy", "age3 kappa", "age3 AUC")
+kable(round(agegroups, 3))
+
+```
+
+\end{landscape}
+
+
+
+
