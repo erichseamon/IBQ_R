@@ -87,7 +87,7 @@ train_control<- trainControl(method="repeatedcv", savePredictions = "final", cla
 cl <- makePSOCKcluster(10)
 registerDoParallel(cl)
 
-fit_rf_gender <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_rf_gender <- caret::train(fmla, data=training, method="rf", trControl = train_control, importance = TRUE)
 fit_lda_gender <- caret::train(fmla, data=training, method="lda", trControl = train_control)
 fit_glm_gender <- caret::train(fmla, data=training, method="glm", trControl = train_control)
 fit_knn_gender <- caret::train(fmla, data=training, method="knn",trControl = train_control)
@@ -197,7 +197,7 @@ train_control<- trainControl(method="repeatedcv", savePredictions = "final", cla
 cl <- makePSOCKcluster(10)
 registerDoParallel(cl)
 
-fit_rf_agegrp <- caret::train(fmla, data=training, method="rf", trControl = train_control, verbose = FALSE)
+fit_rf_agegrp <- caret::train(fmla, data=training, method="rf", trControl = train_control, verbose = FALSE, importance = TRUE)
 fit_lda_agegrp <- caret::train(fmla, data=training, method="lda", trControl = train_control, verbose = FALSE)
 fit_glm_agegrp <- caret::train(fmla, data=training, trControl = train_control, method="multinom", verbose = FALSE)  #altered to multinom given multiple classes
 fit_knn_agegrp <- caret::train(fmla, data=training, method="knn",trControl = train_control)
@@ -259,6 +259,18 @@ j <- j+1
 
 ```
 
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 10.5, fig.height = 7.5}
+
+p2 <- varImp(fit_rf_gender, scale = FALSE)
+
+library(gridExtra)
+ggplot(p2) + ggtitle("Random Forest Gender Model", subtitle = "All Age Groups")   + theme_classic(base_size = 17)
+```
+
+
+
+
+
 ## Model Development and Output: Infant gender for Age Group 1
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 10.5, fig.height = 7.5}
@@ -286,7 +298,7 @@ train_control<- trainControl(method="repeatedcv", savePredictions = "final", cla
 cl <- makePSOCKcluster(10)
 registerDoParallel(cl)
 
-fit_rf_gender_age_one <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_rf_gender_age_one <- caret::train(fmla, data=training, method="rf", trControl = train_control, importance = TRUE)
 fit_lda_gender_age_one <- caret::train(fmla, data=training, method="lda", trControl = train_control)
 fit_glm_gender_age_one <- caret::train(fmla, data=training, method="glm", trControl = train_control)
 fit_knn_gender_age_one <- caret::train(fmla, data=training, method="knn",trControl = train_control)
@@ -398,7 +410,7 @@ train_control<- trainControl(method="repeatedcv", savePredictions = "final", cla
 cl <- makePSOCKcluster(10)
 registerDoParallel(cl)
 
-fit_rf_gender_age_two <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_rf_gender_age_two <- caret::train(fmla, data=training, method="rf", trControl = train_control, importance = TRUE)
 fit_lda_gender_age_two <- caret::train(fmla, data=training, method="lda", trControl = train_control)
 fit_glm_gender_age_two <- caret::train(fmla, data=training, method="glm", trControl = train_control)
 fit_knn_gender_age_two <- caret::train(fmla, data=training, method="knn",trControl = train_control)
@@ -511,7 +523,7 @@ train_control<- trainControl(method="repeatedcv", savePredictions = "final", cla
 cl <- makePSOCKcluster(10)
 registerDoParallel(cl)
 
-fit_rf_gender_age_three <- caret::train(fmla, data=training, method="rf", trControl = train_control)
+fit_rf_gender_age_three <- caret::train(fmla, data=training, method="rf", trControl = train_control, importance = TRUE)
 fit_lda_gender_age_three <- caret::train(fmla, data=training, method="lda", trControl = train_control)
 fit_glm_gender_age_three <- caret::train(fmla, data=training, method="glm", trControl = train_control)
 fit_knn_gender_age_three <- caret::train(fmla, data=training, method="knn",trControl = train_control)
@@ -593,6 +605,25 @@ results_age3 <- results
  auc_age3 <- txt2
 
 ```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 10.5, fig.height = 7.5}
+
+p1 <- varImp(fit_rf_gender_age_one, scale = FALSE)
+p2 <- varImp(fit_rf_gender_age_two, scale = FALSE)
+p3 <- varImp(fit_rf_gender_age_three, scale = FALSE)
+
+
+
+p1a <- ggplot(p1) + ggtitle("Random Forest Gender Model", subtitle = "Age Group 1")   + theme_classic(base_size = 17)
+p2a <- ggplot(p2) + ggtitle("Random Forest Gender Model", subtitle = "Age Group 2")   + theme_classic(base_size = 17)
+p3a <- ggplot(p3) + ggtitle("Random Forest Gender Model", subtitle = "Age Group 3") + theme_classic(base_size = 17)
+
+p1a
+p2a
+p3a
+
+```
+
 
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE, include = FALSE, fig.width = 10.5, fig.height = 7.5}
